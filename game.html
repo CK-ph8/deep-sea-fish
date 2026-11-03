@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Deep Sea Fish: Endless Ocean</title>
+
+<style>
+body {
+    margin: 0;
+    background: #000814;
+    color: #00f5d4;
+    font-family: 'Courier New', Courier, monospace;
+    overflow: hidden;
+}
+
+#ui {
+    position: absolute;
+    top: 12px;
+    width: 100%;
+    text-align: center;
+    font-size: 20px;
+    pointer-events: none;
+}
+
+canvas {
+    display: block;
+    margin: 50px auto 0;
+    border: 4px solid #00f5d4;
+    box-shadow: 0 0 40px rgba(0,245,212,0.3);
+    /* Add these two lines */
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+#menu {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.9);
+    padding: 40px;
+    border-radius: 15px;
+    border: 2px solid #ff5d8f;
+    text-align: center;
+}
+
+button {
+    padding: 14px 28px;
+    font-size: 18px;
+    background: #ff5d8f;
+    border: none;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+}
+button:hover { background: #ff2a6d; }
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+LEVEL: <span id="level">1</span> |
+SCORE: <span id="score">0</span> |
+HEALTH: <span id="health">❤️❤️❤️</span>
+</div>
+
+<div id="menu">
+    <h1 id="menuTitle">OCEAN JOURNEY ENDED</h1>
+    <p id="menuText"></p>
+    <button onclick="startNewGame()">SWIM AGAIN</button>
+</div>
+
+<canvas id="gameCanvas" width="800" height="500"></canvas>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const menu = document.getElementById("menu");
+
+ctx.imageSmoothingEnabled = false;
+ctx.mozImageSmoothingEnabled = false;
+ctx.webkitImageSmoothingEnabled = false;
+ctx.msImageSmoothingEnabled = false;
+
+// ===== IMAGES =====
+const bgm = new Audio("BGM.mp3");
+bgm.loop = true;      // This makes it repeat forever
+bgm.volume = 0.5;
+const hurtSfx = new Audio("hurt.mp3");
+const collectSfx = new Audio("collect.mp3");
+
+const fishImg = new Image();
+fishImg.src = "Main fish.png";
+
+const plasticImgs = [
+    (() => { const i = new Image(); i.src = "Plastic1.png"; return i; })(),
+    (() => { const i = new Image(); i.src = "Item2.png"; return i; })(),
+    (() => { const i = new Image(); i.src = "Item3.png"; return i; })()
+];
+
+
+const treasureImg = new Image();
+treasureImg.src = "Food.png";
+
+const heartImg = new Image();
+heartImg.src = "Heart.png";
+
+const coralImg = new Image();
+coralImg.src = "Rock.png";
+
+const bgImg = new Image();
+bgImg.src = "Background.png";
+
+// ===== PHYSICS =====
+const GRAVITY = 0.08;
+const SWIM = -0.4;
+const SPEED = 4;
+
+// ===== STATE =====
+let fish, enemies, items, platforms;
+let score, health, level, hitCooldown, gameOver;
+const keys = {};
+
+window.addEventListener("keydown", e => keys[e.code] = true);
+window.addEventListener("keyup", e => keys[e.code] = false);
+
+// ===== START GAME =====
+function startNewGame() {
+    bgm.play().catch(e => {
+        console.log();
+    });
+    level = 1;
+    score = 0;
+    health = 3;
+    gameOver = false;
+    menu.style.display = "none";
+    setupLevel();
+}
+
+// ===== SETUP LEVEL =====
+function setupLevel() {
+    hitCooldown = 0;
+
+    document.getElementById("level").innerText = level;
+    document.getElementById("score").innerText = score;
+    document.getElementById("health").innerText = "❤️".repeat(health);
+
+    fish = {
+        x: 80, y: 200, w: 48, h: 48,
+        vx: 0, vy: 0, dir: 1
+    };
+
+    platforms = [];
+
+    platforms.push({ x: 0, y: 460, w: 800, h: 40 });
+
+    platforms = [{ x: 0, y: 460, w: 800, h: 40 }];
+
+    const platformCount = 2 + Math.floor(Math.random() * 2);
+    let lastX = 100;
+
+    for (let i = 0; i < platformCount; i++) {
+        lastX += 200 + Math.random() * 100;
+
+        platforms.push({
+            x: lastX % 650,
+            y: 140 + Math.random() * 260,
+            w: 140,
+            h: 30
+        });
+    }
+
+    enemies = [];
+
+    const enemyCount = Math.min(1 + Math.floor(level * 0.8), 6);
+
+    for (let i = 0; i < enemyCount; i++) {
+        const startX = Math.random() * 600 + 100;
+
+        enemies.push({
+            x: startX,
+            y: 140 + Math.random() * 260,
+            w: 48,
+            h: 48,
+            speed: 0.8 + level * 0.2,
+            range: 80 + Math.random() * 120,
+            start: startX,
+            img: plasticImgs
+                ? plasticImgs[Math.floor(Math.random() * plasticImgs.length)]
+                : plasticImg
+        });
+
+    }
+        items = [];
+        for (let i = 0; i < 3; i++) {
+            items.push({
+                x: Math.random() * 700 + 50,
+                y: Math.random() * 350 + 80,
+                w: 32, h: 32,
+                type: Math.random() < 0.25 ? "heal" : "treasure"
+            });
+        }
+    }
+
+
+// ===== UPDATE =====
+function update() {
+    if (gameOver) return;
+    if (hitCooldown > 0) hitCooldown--;
+
+    if (keys["ArrowRight"]) { fish.vx = SPEED; fish.dir = 1; }
+    else if (keys["ArrowLeft"]) { fish.vx = -SPEED; fish.dir = -1; }
+    else fish.vx *= 0.85;
+
+    if (keys["ArrowUp"] || keys["Space"]) fish.vy += SWIM;
+
+    fish.vy += GRAVITY;
+    fish.vy *= 0.98;
+
+    fish.x += fish.vx;
+    fish.y += fish.vy;
+
+    platforms.forEach(p => {
+        if (collide(fish, p) && fish.vy > 0) {
+            fish.vy = 0;
+            fish.y = p.y - fish.h;
+        }
+    });
+
+    enemies.forEach(e => {
+        e.x += e.speed;
+        e.y += Math.sin(Date.now() * 0.002) * 0.4;
+        if (e.x > e.start + e.range || e.x < e.start - e.range) e.speed *= -1;
+
+        if (collide(fish, e) && hitCooldown <= 0) {
+            health--;
+            hitCooldown = 60;
+                hurtSfx.currentTime = 0;
+                hurtSfx.play();
+            document.getElementById("health").innerText = "❤️".repeat(health);
+            if (health <= 0) endGame();
+        }
+    });
+
+    for (let i = items.length - 1; i >= 0; i--) {
+        if (collide(fish, items[i])) {
+            if (items[i].type === "heal" && health < 5) health++;
+            else score += 100;
+            collectSfx.currentTime = 0;
+            collectSfx.play();
+
+            items.splice(i, 1);
+            document.getElementById("score").innerText = score;
+            document.getElementById("health").innerText = "❤️".repeat(health);
+        }
+    }
+
+    if (items.length === 0) {
+        level++;
+        setupLevel();
+    }
+
+    if (fish.y > canvas.height) endGame();
+}
+
+// ===== DRAW =====
+function draw() {
+
+    ctx.imageSmoothingEnabled = false; 
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+
+    platforms.forEach(p => {
+        for (let i = 0; i < p.w; i += 40)
+            ctx.drawImage(coralImg, p.x + i, p.y, 40, 40);
+    });
+
+    items.forEach(it => {
+        ctx.drawImage(it.type === "heal" ? heartImg : treasureImg, it.x, it.y, it.w, it.h);
+    });
+
+    enemies.forEach(e => ctx.drawImage(e.img, e.x, e.y, e.w, e.h));
+
+    if (hitCooldown > 0) ctx.globalAlpha = 0.5;
+
+    ctx.save();
+    if (fish.dir === -1) {
+        ctx.translate(fish.x + fish.w, fish.y);
+        ctx.scale(-1, 1);
+        ctx.drawImage(fishImg, 0, 0, fish.w, fish.h);
+    } else {
+        ctx.drawImage(fishImg, fish.x, fish.y, fish.w, fish.h);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+}
+
+// ===== UTILS =====
+function collide(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x &&
+           a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function endGame() {
+    gameOver = true;
+    bgm.pause();         
+    bgm.currentTime = 0;
+    menu.style.display = "block";
+    document.getElementById("menuText").innerText =
+        `You reached Level ${level} • Score ${score}`;
+}
+
+// ===== LOOP =====
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+startNewGame();
+loop();
+</script>
+</body>
+</html>
